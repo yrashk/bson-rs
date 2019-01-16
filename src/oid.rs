@@ -1,18 +1,22 @@
 //! ObjectId
 
+#[cfg(not(target_arch = "wasm32"))]
 use libc;
 
 use std::sync::atomic::{AtomicUsize, Ordering, ATOMIC_USIZE_INIT};
 use std::{error, fmt, io, result};
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
+#[cfg(not(target_arch = "wasm32"))]
 use md5;
 
 use hex::{self, FromHexError};
 
 use rand::{thread_rng, Rng};
 
+#[cfg(not(target_arch = "wasm32"))]
 use hostname::get_hostname;
+#[cfg(not(target_arch = "wasm32"))]
 use time;
 
 const TIMESTAMP_SIZE: usize = 4;
@@ -187,8 +191,10 @@ impl ObjectId {
     // Generates a new timestamp representing the current seconds since epoch.
     // Represented in Big Endian.
     fn gen_timestamp() -> [u8; 4] {
-        let timespec = time::get_time();
-        let timestamp = timespec.sec as u32;
+        #[cfg(not(target_arch = "wasm32"))]
+        let timestamp = time::get_time().sec as u32;
+        #[cfg(target_arch = "wasm32")]
+        let timestamp = (stdweb::web::Date::new().get_time() / 1000.0) as u32; 
 
         let mut buf: [u8; 4] = [0; 4];
         BigEndian::write_u32(&mut buf, timestamp);
@@ -207,17 +213,38 @@ impl ObjectId {
             }
         }
 
-        let hostname = get_hostname();
-        if hostname.is_none() {
-            return Err(Error::HostnameError);
-        }
 
-        // Hash hostname string
-        let digest = md5::compute(hostname.unwrap().as_str());
-        let hash = format!("{:x}", digest);
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut bytes = {
+            let hostname = get_hostname();
+            if hostname.is_none() {
+                return Err(Error::HostnameError);
+            }
 
-        // Re-convert string to bytes and grab first three
-        let mut bytes = hash.bytes();
+            // Hash hostname string
+            let digest = md5::compute(hostname.unwrap().as_str());
+            let hash = format!("{:x}", digest);
+
+            // Re-convert string to bytes and grab first three
+            hash.into_bytes().into_iter()
+        };
+        #[cfg(target_arch = "wasm32")]
+        let mut bytes = {
+            let storage = stdweb::web::window().local_storage();
+            match storage.get("__ditto__machine_id__") {
+                None => {
+                    let mut value = vec![0;3];
+                    use rand::{RngCore, rngs::OsRng};
+                    let mut rng = OsRng::new().map_err(|_| Error::HostnameError)?;
+                    rng.fill_bytes(&mut value);
+                    storage.insert("__ditto__machine_id__", &hex::encode(&value)).map_err(|_| Error::HostnameError)?;
+                    value.into_iter()
+                },
+                Some(string) => {
+                    hex::decode(string).map_err(|_| Error::HostnameError)?.into_iter()
+                }
+            }
+        };
         let mut vec: [u8; 3] = [0; 3];
         for i in 0..MACHINE_ID_SIZE {
             match bytes.next() {
@@ -233,9 +260,28 @@ impl ObjectId {
     // Gets the process ID and returns it as a 2-byte array.
     // Represented in Little Endian.
     fn gen_process_id() -> [u8; 2] {
-        let pid = unsafe { libc::getpid() as u16 };
         let mut buf: [u8; 2] = [0; 2];
-        LittleEndian::write_u16(&mut buf, pid);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let pid = unsafe { libc::getpid() as u16 };
+            LittleEndian::write_u16(&mut buf, pid);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let storage = stdweb::web::window().session_storage();
+            match storage.get("__ditto__process_id__") {
+                None => {
+                    use rand::{RngCore, rngs::OsRng};
+                    let mut rng = OsRng::new().unwrap();
+                    rng.fill_bytes(&mut buf);
+                    storage.insert("__ditto__process_id__", &hex::encode(&buf)).unwrap();
+                },
+                Some(string) => {
+                    &buf.copy_from_slice(&hex::decode(string).unwrap());
+                }
+            }
+        }
+
         buf
     }
 
@@ -279,6 +325,7 @@ impl fmt::Debug for ObjectId {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn pid_generation() {
     let pid = unsafe { libc::getpid() as u16 };
     let generated = ObjectId::gen_process_id();

@@ -24,7 +24,7 @@ name = "bson"
 byteorder = "1"
 chrono = "0.4"
 libc = "0.2"
-rand = "0.5"
+rand = { version = "0.6", features = ["stdweb"] }
 serde = "1.0"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 time = "0.1"
@@ -33,6 +33,7 @@ hostname = "0.1"
 hex = "0.3"
 md5 = "0.3"
 try_from = "0.2"
+stdweb = "0.4"
 
 [dev-dependencies]
 assert_matches = "1.2"
